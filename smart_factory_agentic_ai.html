@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Factory Agentic RAG Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        // Firebase SDK imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, getDocs, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Global Variables for Canvas Environment ---
+        // These variables are provided by the Canvas environment at runtime.
+        // We provide fallback values for local testing outside Canvas.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-smart-factory-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "YOUR_FIREBASE_API_KEY",
+            authDomain: "YOUR_FIREBASE_AUTH_DOMAIN",
+            projectId: "YOUR_FIREBASE_PROJECT_ID",
+            storageBucket: "YOUR_FIREBASE_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_FIREBASE_MESSAGING_SENDER_ID",
+            appId: "YOUR_FIREBASE_APP_ID"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- Firebase Initialization ---
+        let app;
+        let db;
+        let auth;
+        let userId;
+
+        const initializeFirebase = async () => {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+                console.log("Firebase initialized. User ID:", userId);
+                document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
+                await loadDocumentsToFirestore(); // Ensure documents are in Firestore
+                await loadDocumentsFromFirestore(); // Load documents for RAG
+                document.getElementById('queryInput').disabled = false;
+                document.getElementById('runAgentBtn').disabled = false;
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                document.getElementById('responseOutput').textContent = `Error initializing app: ${error.message}. Please check console for details.`;
+            }
+        };
+
+        // --- Simulated Factory Data Sources (In-Memory for Demo) ---
+        const simulatedSensorData = {
+            "MachineA": {
+                "vibration_x": "7.2 mm/s (elevated)",
+                "temperature_motor": "85°C (high)",
+                "pressure_hydraulic": "1200 psi (normal)"
+            },
+            "MachineB": {
+                "vibration_x": "3.1 mm/s (normal)",
+                "temperature_motor": "60°C (normal)",
+                "pressure_hydraulic": "1050 psi (normal)"
+            }
+        };
+
+        const simulatedMLPredictions = {
+            "MachineA": {
+                "status": "anomaly detected",
+                "prediction": "High probability of Tool Wear Failure (TWF) in next 24 hours due to abnormal vibration patterns.",
+                "confidence": "92%"
+            },
+            "MachineB": {
+                "status": "normal",
+                "prediction": "No anomalies detected.",
+                "confidence": "99%"
+            }
+        };
+
+        const simulatedMESData = {
+            "MachineA": {
+                "production_rate": "85 units/hour (15% below baseline)",
+                "last_quality_check": "Failed (3 defects)",
+                "current_work_order": "WO-7890"
+            },
+            "MachineB": {
+                "production_rate": "100 units/hour (normal)",
+                "last_quality_check": "Passed",
+                "current_work_order": "WO-7891"
+            }
+        };
+
+        const simulatedERPData = {
+            "Tool_A_Spare": {
+                "inventory": "2 units",
+                "location": "Warehouse A, Bin 12B"
+            },
+            "Filter_B_Spare": {
+                "inventory": "15 units",
+                "location": "Warehouse B, Shelf 3"
+            }
+        };
+
+        const simulatedCameraAnomalyReports = {
+            "ProductionLine_Camera_1": {
+                "last_report_time": "2025-07-23T15:30:00Z",
+                "anomalies_detected": [
+                    "Surface scratch on Product X (count: 5)",
+                    "Missing component on Product Y (count: 1)"
+                ],
+                "correlation_machine": "MachineA"
+            },
+            "AssemblyLine_Camera_2": {
+                "last_report_time": "2025-07-23T14:00:00Z",
+                "anomalies_detected": ["None"],
+                "correlation_machine": "MachineB"
+            }
+        };
+
+        // --- Simulated RAG Documents (Stored in Firestore) ---
+        const factoryDocuments = [
+            {
+                id: "SOP-MA-TWF-001",
+                title: "SOP: Machine A - Tool Wear Failure Troubleshooting",
+                content: `SOP-MA-TWF-001: Machine A - Tool Wear Failure Troubleshooting Guide.
+                Step 1: Observe vibration patterns. Normal vibration is below 5 mm/s. Elevated vibration (5-8 mm/s) indicates potential wear. High vibration (>8 mm/s) indicates severe wear.
+                Step 2: Check tool alignment. Misalignment can accelerate wear.
+                Step 3: Inspect tool for visible damage (chips, cracks).
+                Step 4: If tool wear is confirmed by vibration or visual inspection, proceed with tool replacement.
+                Step 5: Refer to Technical Spec MA-001 for tool replacement procedure.
+                Expected outcome: Reduced vibration, improved output quality.`
+            },
+            {
+                id: "TECH-SPEC-MA-001",
+                title: "Technical Specification: Machine A - General Overview",
+                content: `Technical Specification MA-001: Machine A - General Overview.
+                Model: XYZ-7000.
+                Operating Parameters:
+                - Normal Vibration: 2-5 mm/s
+                - Normal Motor Temperature: 50-75°C
+                - Normal Hydraulic Pressure: 1000-1300 psi
+                Key Components: Tool Head (Part #TH-7000), Hydraulic Pump (Part #HP-XYZ).
+                Maintenance Schedule: Tool Head replacement every 5000 operating hours or upon wear detection.
+                Common Issues: Tool wear, hydraulic leaks, sensor calibration drift.`
+            },
+            {
+                id: "SOP-QLTY-005",
+                title: "SOP: Production Line Quality Control - Defect Classification",
+                content: `SOP-QLTY-005: Production Line Quality Control - Defect Classification.
+                This SOP details common product defects and their classification.
+                - Surface Scratch: Minor surface damage, often caused by abrasive contact.
+                - Missing Component: Absence of a required part, indicates assembly issue.
+                - Discoloration: Off-color areas, can indicate material or process issue.
+                - Deformation: Product shape deviation, often due to pressure or heat.
+                Action for detected defects: Isolate affected batch, log defect type, notify production supervisor. If defect rate exceeds 2%, halt line for investigation.`
+            }
+        ];
+
+        let loadedDocuments = []; // Stores documents fetched from Firestore for RAG
+
+        // --- Firestore Document Management ---
+        const loadDocumentsToFirestore = async () => {
+            const collectionRef = collection(db, `artifacts/${appId}/public/data/factory_docs`);
+            for (const docData of factoryDocuments) {
+                await setDoc(doc(collectionRef, docData.id), docData);
+            }
+            console.log("Sample documents ensured in Firestore.");
+        };
+
+        const loadDocumentsFromFirestore = async () => {
+            const collectionRef = collection(db, `artifacts/${appId}/public/data/factory_docs`);
+            const snapshot = await getDocs(collectionRef);
+            loadedDocuments = snapshot.docs.map(doc => doc.data());
+            console.log("Documents loaded from Firestore:", loadedDocuments);
+        };
+
+        // --- Agent Tools ---
+        // These functions simulate external systems/ML models and are callable by the agent.
+        const tools = [
+            {
+                name: "get_sensor_data",
+                description: "Retrieves current sensor readings for a specified machine. Input: JSON object with 'machine_id' (string).",
+                func: async (input) => {
+                    const { machine_id } = JSON.parse(input);
+                    return JSON.stringify(simulatedSensorData[machine_id] || { error: "Machine not found or no sensor data." });
+                }
+            },
+            {
+                name: "run_predictive_maintenance_model",
+                description: "Triggers a predictive maintenance ML model for a machine to forecast potential failures based on current sensor data. Input: JSON object with 'machine_id' (string) and 'sensor_data' (object, optional, will use current if not provided).",
+                func: async (input) => {
+                    const { machine_id } = JSON.parse(input);
+                    // In a real scenario, sensor_data might be passed or fetched internally
+                    return JSON.stringify(simulatedMLPredictions[machine_id] || { error: "No ML prediction for this machine." });
+                }
+            },
+            {
+                name: "get_mes_production_status",
+                description: "Fetches current production status, quality checks, and work orders from the Manufacturing Execution System (MES) for a specified machine. Input: JSON object with 'machine_id' (string).",
+                func: async (input) => {
+                    const { machine_id } = JSON.parse(input);
+                    return JSON.stringify(simulatedMESData[machine_id] || { error: "No MES data for this machine." });
+                }
+            },
+            {
+                name: "check_erp_inventory",
+                description: "Checks Enterprise Resource Planning (ERP) system for inventory levels of a specific part. Input: JSON object with 'part_number' (string).",
+                func: async (input) => {
+                    const { part_number } = JSON.parse(input);
+                    return JSON.stringify(simulatedERPData[part_number] || { error: "Part not found in ERP inventory." });
+                }
+            },
+            {
+                name: "get_camera_anomaly_report",
+                description: "Retrieves the latest anomaly detection report from a production line camera, detailing detected defects. Input: JSON object with 'camera_id' (string).",
+                func: async (input) => {
+                    const { camera_id } = JSON.parse(input);
+                    return JSON.stringify(simulatedCameraAnomalyReports[camera_id] || { error: "No anomaly report for this camera." });
+                }
+            },
+            {
+                name: "retrieve_document_context",
+                description: "Retrieves relevant information from factory documents (SOPs, technical specifications) based on keywords. Input: JSON object with 'keywords' (array of strings).",
+                func: async (input) => {
+                    const { keywords } = JSON.parse(input);
+                    // Simple keyword-based RAG simulation for demo purposes
+                    const relevantDocs = loadedDocuments.filter(doc =>
+                        keywords.some(keyword => doc.content.toLowerCase().includes(keyword.toLowerCase()))
+                    );
+                    if (relevantDocs.length > 0) {
+                        return relevantDocs.map(doc => `Document Title: ${doc.title}\nContent: ${doc.content}`).join("\n\n");
+                    }
+                    return "No relevant documents found for the given keywords.";
+                }
+            }
+        ];
+
+        // --- Agent Orchestration Logic ---
+        const runAgent = async () => {
+            const query = document.getElementById('queryInput').value;
+            const outputDiv = document.getElementById('responseOutput');
+            const loader = document.getElementById('loader');
+            outputDiv.innerHTML = ''; // Clear previous output
+            loader.classList.remove('hidden'); // Show loader
+
+            let chatHistory = [{ role: "user", parts: [{ text: query }] }];
+            let finalResponse = "";
+            let thoughtProcess = "";
+
+            const appendToOutput = (text) => {
+                outputDiv.innerHTML += `<p class="text-gray-700 mb-2">${text}</p>`;
+                outputDiv.scrollTop = outputDiv.scrollHeight; // Scroll to bottom
+            };
+
+            const appendThought = (thought) => {
+                thoughtProcess += `<p class="text-sm text-blue-600 italic mb-1">Agent Thought: ${thought}</p>`;
+                outputDiv.innerHTML = thoughtProcess + finalResponse; // Update with thoughts
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+            };
+
+            try {
+                let currentPrompt = `You are a Smart Factory Advisor AI. Your goal is to provide comprehensive and relevant responses to queries about factory operations, machine issues, and production.
+You have access to the following tools:
+${tools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
+
+To use a tool, respond with a JSON object like this:
+\`\`\`json
+{
+  "tool": "tool_name",
+  "tool_input": { "param1": "value1", "param2": "value2" }
+}
+\`\`\`
+After using a tool, the tool's output will be provided to you. Based on the tool output, you can either call another tool or provide a final answer.
+If you need to retrieve document context, use the 'retrieve_document_context' tool with an array of relevant keywords.
+When you have a final answer, respond with the following format:
+\`\`\`json
+{
+  "answer": "Your comprehensive and relevant response here."
+}
+\`\`\`
+Your response should be detailed, drawing from all available information.
+User query: "${query}"`;
+
+                let iterations = 0;
+                const maxIterations = 7; // Prevent infinite loops
+
+                while (iterations < maxIterations) {
+                    iterations++;
+                    appendThought(`Iteration ${iterations} - Thinking...`);
+
+                    const payload = {
+                        contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "OBJECT",
+                                properties: {
+                                    tool: { type: "STRING", description: "Name of the tool to call" },
+                                    tool_input: { type: "OBJECT", description: "Parameters for the tool" },
+                                    answer: { type: "STRING", description: "The final answer to the user's query" }
+                                }
+                            }
+                        }
+                    };
+
+                    const apiKey = ""; // Canvas will provide this at runtime
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json();
+                    let agentResponse;
+
+                    try {
+                        // The Gemini API returns JSON as a string within the 'text' part
+                        agentResponse = JSON.parse(result.candidates[0].content.parts[0].text);
+                    } catch (parseError) {
+                        console.error("Error parsing agent response JSON:", parseError);
+                        console.log("Raw LLM response:", result.candidates[0].content.parts[0].text);
+                        appendThought("LLM did not return valid JSON. Attempting to interpret as final answer.");
+                        finalResponse = `<p class="text-red-700">Error: Agent failed to provide a structured response. Raw output: ${result.candidates[0].content.parts[0].text}</p>`;
+                        break; // Exit loop on parse error
+                    }
+
+                    if (agentResponse.answer) {
+                        finalResponse = `<p class="text-green-800 font-bold">Final Answer:</p><p>${agentResponse.answer}</p>`;
+                        appendToOutput(finalResponse);
+                        break; // Exit loop, got final answer
+                    } else if (agentResponse.tool && agentResponse.tool_input) {
+                        const toolName = agentResponse.tool;
+                        const toolInput = JSON.stringify(agentResponse.tool_input); // Keep as string for display
+                        appendThought(`Calling tool: ${toolName} with input: ${toolInput}`);
+
+                        const tool = tools.find(t => t.name === toolName);
+                        if (tool) {
+                            const toolOutput = await tool.func(toolInput);
+                            appendThought(`Tool Output: ${toolOutput}`);
+                            currentPrompt += `\n\nTool Call: ${toolName}\nTool Input: ${toolInput}\nTool Output: ${toolOutput}\n\nBased on this, what is the next step or final answer?`;
+                        } else {
+                            appendThought(`Error: Tool '${toolName}' not found.`);
+                            finalResponse = `<p class="text-red-700">Error: Agent tried to call an unknown tool: ${toolName}.</p>`;
+                            break;
+                        }
+                    } else {
+                        appendThought("Agent did not provide a tool call or a final answer.");
+                        finalResponse = `<p class="text-red-700">Error: Agent did not provide a clear action or final answer.</p>`;
+                        break;
+                    }
+                }
+
+                if (iterations >= maxIterations) {
+                    finalResponse = `<p class="text-orange-700">Agent reached maximum iterations without a final answer. Current prompt state: ${currentPrompt}</p>`;
+                }
+
+            } catch (error) {
+                console.error("Error running agent:", error);
+                finalResponse = `<p class="text-red-700">An error occurred: ${error.message}. Please check console.</p>`;
+            } finally {
+                loader.classList.add('hidden'); // Hide loader
+                outputDiv.innerHTML = thoughtProcess + finalResponse; // Ensure final output is shown
+            }
+        };
+
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', initializeFirebase);
+        document.getElementById('runAgentBtn').addEventListener('click', runAgent);
+        document.getElementById('queryInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                runAgent();
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-6 min-h-screen flex flex-col items-center">
+    <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-4xl">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Smart Factory Agentic RAG Demo</h1>
+        <p id="user-id-display" class="text-sm text-gray-500 mb-4 text-center">User ID: Loading...</p>
+
+        <div class="mb-6">
+            <label for="queryInput" class="block text-gray-700 text-sm font-bold mb-2">Your Query:</label>
+            <textarea id="queryInput" rows="3" class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200" placeholder="e.g., Machine A is showing an unexpected drop in output quality today, what could be wrong, and what's the recommended fix?" disabled></textarea>
+        </div>
+
+        <div class="flex justify-center mb-6">
+            <button id="runAgentBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                Run Factory Advisor Agent
+            </button>
+        </div>
+
+        <div id="loader" class="hidden flex justify-center items-center mb-6">
+            <div class="loader"></div>
+            <span class="ml-3 text-gray-600">Agent thinking...</span>
+        </div>
+
+        <div class="mt-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Agent Response & Thought Process:</h2>
+            <div id="responseOutput" class="text-gray-800 text-base leading-relaxed overflow-y-auto max-h-96">
+                <p class="text-gray-500">Waiting for your query...</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
