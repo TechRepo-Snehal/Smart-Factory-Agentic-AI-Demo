@@ -56,7 +56,7 @@ For a production-grade implementation of such an Agentic RAG system in a smart f
 
 * **Agent Frameworks:** LangChain (Python/JS), LlamaIndex (Python), Marvin (Python), AutoGen (Python) for orchestrating complex agent behaviors.
 * **Large Language Models (LLMs):** Enterprise-grade models like Google's Gemini, OpenAI's GPT series, or fine-tuned open-source models (Llama, Mixtral) hosted on secure infrastructure.
-* **Vector Databases:** Scalable solutions like MonoDB, Chroma, Weaviate, Pinecone, Qdrant, or Elasticsearch (with vector search) for efficient semantic search over documents.
+* **Vector Databases:** Scalable solutions like MongoDB, PostgreSQL, Chroma, Weaviate, Pinecone, Qdrant, or Elasticsearch (with vector search) for efficient semantic search over documents.
 * **Data Integration & Unified Namespace (UNS):**
     * **MQTT Brokers:** HiveMQ, Mosquitto, EMQX for real-time data streaming from IoT devices and PLCs.
     * **OPC UA:** For standardized communication with industrial control systems.
