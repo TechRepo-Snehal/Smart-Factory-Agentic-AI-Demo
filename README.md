@@ -86,7 +86,7 @@ This project offers a glimpse into the future of intelligent manufacturing, wher
 
 To run this demo on your local machine:
 
-1.  **Save the Code:** Copy the entire HTML code (from `<!DOCTYPE html>` to `</html>`) into a file named `index.html` (or any `.html` file) using a plain text editor.
+1.  **Save the html file in your computer:** Save the HTML file attached into the repo called "smart_factory_agentic_ai.html" into your machine.
 2.  **Configure Firebase (Crucial for Data Persistence):**
     * Go to [Firebase Console](https://console.firebase.google.com/).
     * Create a new project.
@@ -104,7 +104,7 @@ To run this demo on your local machine:
         ```
         Click **"Publish Rules"**.
     * Go to **"Build" > "Authentication"** and enable the **"Anonymous"** sign-in method under the "Sign-in method" tab.
-    * In your `index.html` file, find the `firebaseConfig` placeholder and **replace it with the `firebaseConfig` object you copied from your Firebase Console.**
+    * In your html file, find the `firebaseConfig` placeholder and **replace it with the `firebaseConfig` object you copied from your Firebase Console.**
         ```javascript
         const firebaseConfig = {
             // PASTE YOUR ACTUAL FIREBASE CONFIG OBJECT HERE
@@ -118,11 +118,11 @@ To run this demo on your local machine:
         ```
 3.  **Insert Gemini API Key (Crucial for LLM Interaction):**
     * Obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
-    * In your `index.html` file, find the `const apiKey = "";` line and **insert your Gemini API key** between the quotes:
+    * In your html file, find the `const apiKey = "";` line and **insert your Gemini API key** between the quotes:
         ```javascript
         const apiKey = "YOUR_GEMINI_API_KEY_HERE";
         ```
-4.  **Open in Browser:** Double-click your `index.html` file. It will open in your default web browser.
+4.  **Open in Browser:** Double-click your `smart_factory_agentic_ai.html` file. It will open in your default web browser.
 
 ### 📋 Example Queries to Try:
 
